@@ -37,6 +37,8 @@ import android.widget.ImageButton
 import android.widget.Toast
 import androidx.camera.core.*
 import androidx.camera.core.ImageCapture.Metadata
+import androidx.camera.extensions.HdrImageCaptureExtender
+import androidx.camera.extensions.HdrPreviewExtender
 import androidx.camera.lifecycle.ProcessCameraProvider
 import androidx.camera.view.PreviewView
 import androidx.constraintlayout.widget.ConstraintLayout
@@ -84,13 +86,11 @@ class CameraFragment : Fragment() {
     private lateinit var container: ConstraintLayout
     private lateinit var viewFinder: PreviewView
     private lateinit var outputDirectory: File
-    private lateinit var broadcastManager: LocalBroadcastManager
 
     private var displayId: Int = -1
     private var lensFacing: Int = CameraSelector.LENS_FACING_BACK
     private var preview: Preview? = null
     private var imageCapture: ImageCapture? = null
-    private var imageAnalyzer: ImageAnalysis? = null
     private var camera: Camera? = null
 
     private val displayManager by lazy {
@@ -99,20 +99,6 @@ class CameraFragment : Fragment() {
 
     /** Blocking camera operations are performed using this executor */
     private lateinit var cameraExecutor: ExecutorService
-
-    /** Volume down button receiver used to trigger shutter */
-    private val volumeDownReceiver = object : BroadcastReceiver() {
-        override fun onReceive(context: Context, intent: Intent) {
-            when (intent.getIntExtra(KEY_EVENT_EXTRA, KeyEvent.KEYCODE_UNKNOWN)) {
-                // When the volume down button is pressed, simulate a shutter button click
-                KeyEvent.KEYCODE_VOLUME_DOWN -> {
-                    val shutter = container
-                            .findViewById<ImageButton>(R.id.camera_capture_button)
-                    shutter.simulateClick()
-                }
-            }
-        }
-    }
 
     /**
      * We need a display listener for orientation changes that do not trigger a configuration
@@ -126,7 +112,6 @@ class CameraFragment : Fragment() {
             if (displayId == this@CameraFragment.displayId) {
                 Log.d(TAG, "Rotation changed: ${view.display.rotation}")
                 imageCapture?.targetRotation = view.display.rotation
-                imageAnalyzer?.targetRotation = view.display.rotation
             }
         } ?: Unit
     }
@@ -149,7 +134,6 @@ class CameraFragment : Fragment() {
         cameraExecutor.shutdown()
 
         // Unregister the broadcast receivers and listeners
-        broadcastManager.unregisterReceiver(volumeDownReceiver)
         displayManager.unregisterDisplayListener(displayListener)
     }
 
@@ -185,12 +169,6 @@ class CameraFragment : Fragment() {
 
         // Initialize our background executor
         cameraExecutor = Executors.newSingleThreadExecutor()
-
-        broadcastManager = LocalBroadcastManager.getInstance(view.context)
-
-        // Set up the intent filter that will receive events from our main activity
-        val filter = IntentFilter().apply { addAction(KEY_EVENT_ACTION) }
-        broadcastManager.registerReceiver(volumeDownReceiver, filter)
 
         // Every time the orientation of device changes, update rotation for use cases
         displayManager.registerDisplayListener(displayListener, null)
@@ -264,23 +242,17 @@ class CameraFragment : Fragment() {
                 .setTargetRotation(rotation)
                 .build()
 
-            // ImageAnalysis
-            imageAnalyzer = ImageAnalysis.Builder()
-                // We request aspect ratio but no resolution
-                .setTargetAspectRatio(screenAspectRatio)
-                // Set initial target rotation, we will have to call this again if rotation changes
-                // during the lifecycle of this use case
-                .setTargetRotation(rotation)
-                .build()
-                // The analyzer can then be assigned to the instance
-                .also {
-                    it.setAnalyzer(cameraExecutor, LuminosityAnalyzer { luma ->
-                        // Values returned from our analyzer are passed to the attached listener
-                        // We log image analysis results here - you should do something useful
-                        // instead!
-                        Log.d(TAG, "Average luminosity: $luma")
-                    })
-                }
+            //HDR
+            val hdrImageCapture = HdrImageCaptureExtender.create(ImageCapture.Builder())
+            if (hdrImageCapture.isExtensionAvailable(cameraSelector)) {
+                // Enable the extension if available.
+                hdrImageCapture.enableExtension(cameraSelector)
+            }
+            val hdrImagePreview = HdrPreviewExtender.create(Preview.Builder())
+            if (hdrImagePreview.isExtensionAvailable(cameraSelector)) {
+                // Enable the extension if available.
+                hdrImagePreview.enableExtension(cameraSelector)
+            }
 
             // Must unbind the use-cases before rebinding them
             cameraProvider.unbindAll()
@@ -289,7 +261,7 @@ class CameraFragment : Fragment() {
                 // A variable number of use-cases can be passed here -
                 // camera provides access to CameraControl & CameraInfo
                 camera = cameraProvider.bindToLifecycle(
-                        this, cameraSelector, preview, imageCapture, imageAnalyzer)
+                        this, cameraSelector, preview, imageCapture)
 
                 // Attach the viewfinder's surface provider to preview use case
                 preview?.setSurfaceProvider(viewFinder.createSurfaceProvider(camera?.cameraInfo))
@@ -360,11 +332,7 @@ class CameraFragment : Fragment() {
                 val photoFile = createFile(outputDirectory, FILENAME, PHOTO_EXTENSION)
 
                 // Setup image capture metadata
-                val metadata = Metadata().apply {
-
-                    // Mirror image when using the front camera
-                    isReversedHorizontal = lensFacing == CameraSelector.LENS_FACING_FRONT
-                }
+                val metadata = Metadata()
 
                 // Create output options object which contains file + metadata
                 val outputOptions = ImageCapture.OutputFileOptions.Builder(photoFile)
@@ -408,6 +376,14 @@ class CameraFragment : Fragment() {
                         ) { _, uri ->
                             Log.d(TAG, "Image capture scanned into media store: $uri")
                         }
+
+                        // Only navigate when the gallery has photos
+                        if (true == outputDirectory.listFiles()?.isNotEmpty()) {
+                            Navigation.findNavController(
+                                    requireActivity(), R.id.fragment_container
+                            ).navigate(CameraFragmentDirections
+                                    .actionCameraToGallery(outputDirectory.absolutePath))
+                        }
                     }
                 })
 
@@ -424,26 +400,9 @@ class CameraFragment : Fragment() {
             }
         }
 
-        // Listener for button used to switch cameras
-        controls.findViewById<ImageButton>(R.id.camera_switch_button).setOnClickListener {
-            lensFacing = if (CameraSelector.LENS_FACING_FRONT == lensFacing) {
-                CameraSelector.LENS_FACING_BACK
-            } else {
-                CameraSelector.LENS_FACING_FRONT
-            }
-            // Re-bind use cases to update selected camera
-            bindCameraUseCases()
-        }
-
         // Listener for button used to view the most recent photo
         controls.findViewById<ImageButton>(R.id.photo_view_button).setOnClickListener {
-            // Only navigate when the gallery has photos
-            if (true == outputDirectory.listFiles()?.isNotEmpty()) {
-                Navigation.findNavController(
-                        requireActivity(), R.id.fragment_container
-                ).navigate(CameraFragmentDirections
-                        .actionCameraToGallery(outputDirectory.absolutePath))
-            }
+
         }
 
         controls.afterMeasured {
@@ -498,94 +457,6 @@ class CameraFragment : Fragment() {
             } catch (e: CameraInfoUnavailableException) {
                 Log.d("ERROR", "cannot access camera", e)
             }
-        }
-    }
-
-
-    /**
-     * Our custom image analysis class.
-     *
-     * <p>All we need to do is override the function `analyze` with our desired operations. Here,
-     * we compute the average luminosity of the image by looking at the Y plane of the YUV frame.
-     */
-    private class LuminosityAnalyzer(listener: LumaListener? = null) : ImageAnalysis.Analyzer {
-        private val frameRateWindow = 8
-        private val frameTimestamps = ArrayDeque<Long>(5)
-        private val listeners = ArrayList<LumaListener>().apply { listener?.let { add(it) } }
-        private var lastAnalyzedTimestamp = 0L
-        var framesPerSecond: Double = -1.0
-            private set
-
-        /**
-         * Used to add listeners that will be called with each luma computed
-         */
-        fun onFrameAnalyzed(listener: LumaListener) = listeners.add(listener)
-
-        /**
-         * Helper extension function used to extract a byte array from an image plane buffer
-         */
-        private fun ByteBuffer.toByteArray(): ByteArray {
-            rewind()    // Rewind the buffer to zero
-            val data = ByteArray(remaining())
-            get(data)   // Copy the buffer into a byte array
-            return data // Return the byte array
-        }
-
-        /**
-         * Analyzes an image to produce a result.
-         *
-         * <p>The caller is responsible for ensuring this analysis method can be executed quickly
-         * enough to prevent stalls in the image acquisition pipeline. Otherwise, newly available
-         * images will not be acquired and analyzed.
-         *
-         * <p>The image passed to this method becomes invalid after this method returns. The caller
-         * should not store external references to this image, as these references will become
-         * invalid.
-         *
-         * @param image image being analyzed VERY IMPORTANT: Analyzer method implementation must
-         * call image.close() on received images when finished using them. Otherwise, new images
-         * may not be received or the camera may stall, depending on back pressure setting.
-         *
-         */
-        override fun analyze(image: ImageProxy) {
-            // If there are no listeners attached, we don't need to perform analysis
-            if (listeners.isEmpty()) {
-                image.close()
-                return
-            }
-
-            // Keep track of frames analyzed
-            val currentTime = System.currentTimeMillis()
-            frameTimestamps.push(currentTime)
-
-            // Compute the FPS using a moving average
-            while (frameTimestamps.size >= frameRateWindow) frameTimestamps.removeLast()
-            val timestampFirst = frameTimestamps.peekFirst() ?: currentTime
-            val timestampLast = frameTimestamps.peekLast() ?: currentTime
-            framesPerSecond = 1.0 / ((timestampFirst - timestampLast) /
-                    frameTimestamps.size.coerceAtLeast(1).toDouble()) * 1000.0
-
-            // Analysis could take an arbitrarily long amount of time
-            // Since we are running in a different thread, it won't stall other use cases
-
-            lastAnalyzedTimestamp = frameTimestamps.first
-
-            // Since format in ImageAnalysis is YUV, image.planes[0] contains the luminance plane
-            val buffer = image.planes[0].buffer
-
-            // Extract image data from callback object
-            val data = buffer.toByteArray()
-
-            // Convert the data into an array of pixel values ranging 0-255
-            val pixels = data.map { it.toInt() and 0xFF }
-
-            // Compute average luminance for the image
-            val luma = pixels.average()
-
-            // Call all listeners with new value
-            listeners.forEach { it(luma) }
-
-            image.close()
         }
     }
 
