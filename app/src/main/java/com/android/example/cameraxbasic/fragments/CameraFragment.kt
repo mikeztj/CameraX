@@ -17,10 +17,8 @@
 package com.android.example.cameraxbasic.fragments
 
 import android.annotation.SuppressLint
-import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
-import android.content.IntentFilter
 import android.content.res.Configuration
 import android.graphics.Color
 import android.graphics.drawable.ColorDrawable
@@ -37,33 +35,19 @@ import android.widget.ImageButton
 import android.widget.Toast
 import androidx.camera.core.*
 import androidx.camera.core.ImageCapture.*
-import androidx.camera.extensions.HdrImageCaptureExtender
-import androidx.camera.extensions.HdrPreviewExtender
 import androidx.camera.lifecycle.ProcessCameraProvider
 import androidx.camera.view.PreviewView
 import androidx.constraintlayout.widget.ConstraintLayout
 import androidx.core.content.ContextCompat
 import androidx.core.net.toFile
-import androidx.core.view.setPadding
 import androidx.fragment.app.Fragment
-import androidx.lifecycle.lifecycleScope
-import androidx.localbroadcastmanager.content.LocalBroadcastManager
 import androidx.navigation.Navigation
-import com.android.example.cameraxbasic.KEY_EVENT_ACTION
-import com.android.example.cameraxbasic.KEY_EVENT_EXTRA
 import com.android.example.cameraxbasic.MainActivity
 import com.android.example.cameraxbasic.R
 import com.android.example.cameraxbasic.utils.ANIMATION_FAST_MILLIS
 import com.android.example.cameraxbasic.utils.ANIMATION_SLOW_MILLIS
-import com.android.example.cameraxbasic.utils.simulateClick
-import com.bumptech.glide.Glide
-import com.bumptech.glide.request.RequestOptions
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.launch
 import java.io.File
-import java.nio.ByteBuffer
 import java.text.SimpleDateFormat
-import java.util.ArrayDeque
 import java.util.Locale
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
@@ -71,9 +55,6 @@ import java.util.concurrent.TimeUnit
 import kotlin.math.abs
 import kotlin.math.max
 import kotlin.math.min
-
-/** Helper type alias used for analysis use case callbacks */
-typealias LumaListener = (luma: Double) -> Unit
 
 /**
  * Main fragment for this app. Implements all camera operations including:
@@ -224,18 +205,6 @@ class CameraFragment : Fragment() {
                 .setTargetRotation(rotation)
                 .build()
 
-            //HDR
-            val hdrImageCapture = HdrImageCaptureExtender.create(ImageCapture.Builder())
-            if (hdrImageCapture.isExtensionAvailable(cameraSelector)) {
-                // Enable the extension if available.
-                hdrImageCapture.enableExtension(cameraSelector)
-            }
-            val hdrImagePreview = HdrPreviewExtender.create(Preview.Builder())
-            if (hdrImagePreview.isExtensionAvailable(cameraSelector)) {
-                // Enable the extension if available.
-                hdrImagePreview.enableExtension(cameraSelector)
-            }
-
             // Must unbind the use-cases before rebinding them
             cameraProvider.unbindAll()
 
@@ -249,6 +218,7 @@ class CameraFragment : Fragment() {
                 preview?.setSurfaceProvider(viewFinder.createSurfaceProvider(camera?.cameraInfo))
             } catch(exc: Exception) {
                 Log.e(TAG, "Use case binding failed", exc)
+                Toast.makeText(context,"Use case binding failed",Toast.LENGTH_SHORT).show();
             }
 
         }, ContextCompat.getMainExecutor(requireContext()))

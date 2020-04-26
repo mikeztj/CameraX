@@ -52,18 +52,6 @@ class MainActivity : AppCompatActivity() {
         }, IMMERSIVE_FLAG_TIMEOUT)
     }
 
-    /** When key down event is triggered, relay it via local broadcast so fragments can handle it */
-    override fun onKeyDown(keyCode: Int, event: KeyEvent): Boolean {
-        return when (keyCode) {
-            KeyEvent.KEYCODE_VOLUME_DOWN -> {
-                val intent = Intent(KEY_EVENT_ACTION).apply { putExtra(KEY_EVENT_EXTRA, keyCode) }
-                LocalBroadcastManager.getInstance(this).sendBroadcast(intent)
-                true
-            }
-            else -> super.onKeyDown(keyCode, event)
-        }
-    }
-
     companion object {
 
         /** Use external media if it is available, our app's file directory otherwise */

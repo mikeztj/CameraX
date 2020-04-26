@@ -27,6 +27,7 @@ import java.io.File
 import android.content.Intent
 import android.media.MediaScannerConnection
 import android.os.Build
+import android.util.Log
 import android.webkit.MimeTypeMap
 import android.widget.ImageButton
 import androidx.constraintlayout.widget.ConstraintLayout
@@ -111,6 +112,10 @@ class GalleryFragment internal constructor() : Fragment() {
 
             mediaList.getOrNull(mediaViewPager.currentItem)?.let { mediaFile ->
 
+                val uri = FileProvider.getUriForFile(
+                        view.context, BuildConfig.APPLICATION_ID + ".provider", mediaFile)
+
+                Log.d("Urii", uri.toString())
                 // Create a sharing intent
                 val intent = Intent().apply {
                     // Infer media type from file extension
@@ -119,6 +124,7 @@ class GalleryFragment internal constructor() : Fragment() {
                     // Get URI from our FileProvider implementation
                     val uri = FileProvider.getUriForFile(
                             view.context, BuildConfig.APPLICATION_ID + ".provider", mediaFile)
+
                     // Set the appropriate intent extra, type, action and flags
                     putExtra(Intent.EXTRA_STREAM, uri)
                     type = mediaType
